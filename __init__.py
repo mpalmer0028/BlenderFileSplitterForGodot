@@ -29,8 +29,9 @@ from bpy.props import EnumProperty, CollectionProperty, BoolProperty, StringProp
 from bpy.types import PropertyGroup, UIList, Operator, Panel, Menu
 
 objects_that_need_to_be_hidden_again = []
+debug_prevent_file_export = False
 
-def make_gltf_file_for_collection(file_path, collection):
+def make_gltf_file_for_collection(file_path, collection, seperate_meshes):
     no_objs = True
     for obj in collection.objects:
         #print(dir(obj))
@@ -41,36 +42,41 @@ def make_gltf_file_for_collection(file_path, collection):
             obj.select_set(True)
             no_objs = False
         except AttributeError:
-            print(obj) 
+            pass
+        if(seperate_meshes):
+            print('export',file_path+'\\'+obj.name, ' : ', collection.name,' - ', obj.name)
+            if not debug_prevent_file_export:
+                # Make sure path exists
+                t_file_path = file_path + '\\'+obj.name
+                #os.makedirs(t_file_path, exist_ok=True)
+                bpy.ops.wm.obj_export(filepath=t_file_path+'.obj', export_selected_objects=True, export_materials=False)
+            bpy.ops.object.select_all(action='DESELECT')
+
     #print(file_path)
-    if not no_objs:
-        bpy.ops.export_scene.gltf(filepath=file_path, use_selection=True)
+    if not no_objs and not seperate_meshes:
+        print('export', collection.name)
+        if not debug_prevent_file_export:
+            bpy.ops.wm.obj_export(filepath=file_path+'.obj', export_selected_objects=True, export_materials=False)
         
     for obj in objects_that_need_to_be_hidden_again:
         obj.show_instancer_for_viewport = False
     
     
-def export_files_for_godot(self, context, export_path, collection, seperate_child_collections=True):
+def export_files_for_godot(self, context, export_path, collection, seperate_meshes=True):
     # Make sure path exists
-    os.makedirs(export_path, exist_ok=True)
-    
+    os.makedirs(export_path+collection.name, exist_ok=True)
+    print('export_files_for_godot: ',export_path+collection.name+'\\')
+
     if bpy.context.object.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT', toggle=False)
             
     # Deselect
     bpy.ops.object.select_all(action='DESELECT')
     
+    for child in collection.children:        
+        export_files_for_godot(self,context,export_path+collection.name+'\\', child, seperate_meshes)
     
-    if(seperate_child_collections):
-        # Export this collection
-        
-        #print(export_path+collection.name+'.gfl', collection.name, collection.collection_objects)
-        for child in collection.children:
-            export_files_for_godot(self,context,export_path+collection.name+'\\', child, seperate_child_collections)
-        #collection = bpy.data.collections[]
-    else:
-        print(collection.all_objects)
-    make_gltf_file_for_collection(export_path+collection.name, collection)
+    make_gltf_file_for_collection(export_path+collection.name, collection, seperate_meshes)
 
 """
 OPERATIONS
@@ -86,8 +92,8 @@ class export_collections_for_godot(Operator):
             raise TypeError('Must set export path for your godot files')
         root_collection = context.scene.godot_root_collection
         export_path = context.scene.godot_collections_export_path
-        
-        export_files_for_godot(self, context, export_path, root_collection, context.scene.godot_split_child_collections_using_dirs)
+        #print('obj split :',context.scene.godot_split_each_mesh_into_a_file)
+        export_files_for_godot(self, context, export_path, root_collection, context.scene.godot_split_each_mesh_into_a_file)
          
         
         
@@ -111,7 +117,7 @@ class VIEW3D_PT_export_collections_for_godot(Panel):
         col = layout.column(align=True, heading="")
         col.prop(scene,"godot_collections_export_path")
         col.prop(scene,"godot_root_collection")
-        col.prop(scene,"godot_split_child_collections_using_dirs")
+        col.prop(scene,"godot_split_each_mesh_into_a_file")
         col.operator("scene.export_collections_for_godot", text="Export")
 
 classes = [export_collections_for_godot, VIEW3D_PT_export_collections_for_godot]
@@ -124,12 +130,12 @@ def register():
     bpy.types.Scene.godot_collections_export_path = StringProperty(
         name='Export Path', subtype='DIR_PATH',
         description='Location for files to be generated')
+        
     bpy.types.Scene.godot_root_collection = bpy.props.PointerProperty(type=bpy.types.Collection,name='Root Collection')
-    bpy.types.Scene.godot_split_child_collections_using_dirs = BoolProperty(
-        name='Split Child Collections Out', default=True,
-        description='When checked every collection down the hierarchy will have a file for objects in it and directories'+
-         ' will be made for child collections. When disabled only the first level of collections in the root collection will'+
-         ' be used to split files, so all other collections down the hierarchy will just be included.')
+    
+    bpy.types.Scene.godot_split_each_mesh_into_a_file = BoolProperty(
+        name='Split each mesh out', default=True,
+        description='When checked each mesh gets a file, otherwise one file per collection')
     
     """Register classes"""
     for cls in classes:
@@ -144,7 +150,7 @@ def unregister():
     """Unregister properties"""
     del bpy.types.Scene.godot_collections_export_path
     del bpy.types.Scene.godot_root_collection
-    del bpy.types.Scene.godot_split_child_collections_using_dirs
+    del bpy.types.Scene.godot_split_each_mesh_into_a_file
 
 if __name__ == "__main__":
     register()
